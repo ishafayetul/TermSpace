@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=TermSpace
+Comment=Native terminal workspaces
+Exec=termspace
+Icon=io.github.ishafayetul.TermSpace
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupNotify=true
+Keywords=terminal;shell;workspace;split;console;

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "Robotics",
+  "window_title": "Robotics workspace",
+  "width": 1120,
+  "height": 720,
+  "tabs": [
+    {
+      "name": "ROS 2",
+      "accent": "#aa8ef0",
+      "layout": {
+        "type": "split",
+        "orientation": "left-right",
+        "ratio": 0.5,
+        "children": [
+          {
+            "type": "split",
+            "orientation": "top-bottom",
+            "ratio": 0.52,
+            "children": [
+              {"type": "terminal", "id": "bringup", "name": "ROS 2 Bringup", "accent": "#aa8ef0"},
+              {"type": "terminal", "id": "navigation", "name": "Navigation", "accent": "#98c79f"}
+            ]
+          },
+          {
+            "type": "split",
+            "orientation": "top-bottom",
+            "ratio": 0.52,
+            "children": [
+              {"type": "terminal", "id": "simulation", "name": "Gazebo Simulation", "accent": "#e9c17f"},
+              {"type": "terminal", "id": "monitoring", "name": "Topic Monitoring", "accent": "#85c8d5"}
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

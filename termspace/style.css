@@ -1,0 +1,64 @@
+.app-header {
+  padding: 4px 8px;
+  min-height: 35px;
+}
+.wordmark {
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+.terminal-tabs > header {
+  padding: 0 6px;
+}
+.terminal-tabs > header tabs tab {
+  min-height: 34px;
+  padding: 0 4px;
+}
+.tab-label {
+  padding-left: 8px;
+}
+.tab-count {
+  font-size: 0.82em;
+  opacity: 0.75;
+  border-radius: 6px;
+  padding: 0 5px;
+  background: alpha(currentColor, 0.08);
+}
+.pane {
+  border: 1px solid alpha(currentColor, 0.15);
+}
+.pane.focused {
+  border-color: @accent_bg_color;
+}
+.pane-header {
+  padding-left: 8px;
+  font-size: 0.9em;
+  font-weight: 600;
+  background: alpha(currentColor, 0.055);
+}
+.pane.focused .pane-header {
+  background: alpha(@accent_bg_color, 0.2);
+}
+.pane-header button,
+.tab-label button {
+  padding: 1px 4px;
+  min-height: 20px;
+  min-width: 20px;
+}
+paned > separator {
+  min-height: 5px;
+  min-width: 5px;
+}
+.terminal-scrollbar {
+  background: alpha(currentColor, 0.04);
+}
+.status-bar, .search-bar {
+  padding: 6px 10px;
+  font-size: 0.88em;
+}
+.status-bar {
+  border-top: 1px solid alpha(currentColor, 0.12);
+}
+.terminal-scrollbar slider {
+  min-width: 5px;
+  background-color: alpha(currentColor, 0.32);
+}
