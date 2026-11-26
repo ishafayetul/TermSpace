@@ -8,7 +8,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from .model import HARD_LIMITS, Invalid, decode, label, mapping, profile, require, settings, workspace
+from .model import HARD_LIMITS, Invalid, custom_theme, decode, label, mapping, profile, require, settings, workspace
+from .themes import ALIASES, NAMES
 
 DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 READ = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -35,26 +36,51 @@ def read(fd: int, size: int, *, private: bool) -> dict:
         return decode(stream.read(size + 1), size)
 
 
-def import_file(path: Path, size: int) -> dict:
+@contextmanager
+def local_parent(path: Path):
+    require(path.is_absolute() and path.name and ".." not in path.parts, "Choose an absolute local file.")
+    fd = os.open("/", DIRECTORY)
+    try:
+        for part in path.parent.parts[1:]:
+            child = os.open(part, DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def import_file(path: Path, size: int, *, strict: bool = False) -> dict:
+    if strict:
+        with local_parent(path) as folder:
+            return read(os.open(path.name, READ, dir_fd=folder), size, private=False)
     return read(os.open(path, READ), size, private=False)
 
 
-def export_file(path: Path, data: dict, size: int) -> None:
+def export_file(path: Path, data: dict, size: int, *, strict: bool = False) -> None:
     content = encode(data, size)
-    folder = os.open(path.parent, DIRECTORY)
-    temp = ".termspace-export-" + uuid4().hex
-    try:
-        fd = os.open(temp, CREATE, 0o600, dir_fd=folder)
+    if strict:
+        with local_parent(path) as folder:
+            write_export(folder, path.name, content)
+    else:
+        folder = os.open(path.parent, DIRECTORY)
         try:
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.link(temp, path.name, src_dir_fd=folder, dst_dir_fd=folder, follow_symlinks=False)
+            write_export(folder, path.name, content)
         finally:
-            os.unlink(temp, dir_fd=folder)
+            os.close(folder)
+
+
+def write_export(folder: int, name: str, content: bytes) -> None:
+    temp = ".termspace-export-" + uuid4().hex
+    fd = os.open(temp, CREATE, 0o600, dir_fd=folder)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temp, name, src_dir_fd=folder, dst_dir_fd=folder, follow_symlinks=False)
     finally:
-        os.close(folder)
+        os.unlink(temp, dir_fd=folder)
 
 
 def xdg(variable: str, fallback: Path) -> Path:
@@ -63,18 +89,21 @@ def xdg(variable: str, fallback: Path) -> Path:
 
 
 def catalog(data: dict) -> dict:
-    mapping(data, {"schema_version", "settings", "workspaces", "profiles"})
+    mapping(data, {"schema_version", "settings", "workspaces", "profiles", "themes"})
     require(type(data.get("schema_version")) is int and data["schema_version"] == 1,
             "Unsupported catalog schema.")
     result = {"schema_version": 1, "settings": settings(data.get("settings", {})),
-              "workspaces": data.get("workspaces", {}), "profiles": data.get("profiles", {})}
+              "workspaces": data.get("workspaces", {}), "profiles": data.get("profiles", {}),
+              "themes": data.get("themes", {})}
     validators = {"workspaces": lambda value: workspace(value, HARD_LIMITS),
-                  "profiles": lambda value: profile(value, check_paths=False)}
+                  "profiles": lambda value: profile(value, check_paths=False), "themes": custom_theme}
     for key, validate in validators.items():
         items = result[key]
         require(type(items) is dict and len(items) <= 128, "Invalid catalog entries.")
         for name, value in items.items():
             require(label(name) == name, "Invalid catalog entry name.")
+            if key == "themes":
+                require(name not in NAMES and name not in ALIASES, "Theme name is reserved.")
             clean = validate(value)
             if key == "workspaces":
                 require(clean["name"] == name, "Workspace catalog name does not match its entry.")

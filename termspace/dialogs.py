@@ -55,13 +55,13 @@ def prompt(parent, heading: str, value: str, callback, detail: str = "") -> None
         lambda response, text: callback(text) if response == 1 else None, text=value, default=1)
 
 
-def choose_file(parent, *, save: bool, name: str, callback) -> None:
+def choose_file(parent, *, save: bool, name: str, callback, kind: str = "workspace") -> None:
     action = Gtk.FileChooserAction.SAVE if save else Gtk.FileChooserAction.OPEN
-    dialog = Gtk.FileChooserNative.new("Export workspace" if save else "Import workspace",
+    dialog = Gtk.FileChooserNative.new(f"Export {kind}" if save else f"Import {kind}",
                                        parent, action, "Export" if save else "Import", "Cancel")
     if save:
         dialog.set_current_name(name)
-    file_filter = Gtk.FileFilter(name="Workspace JSON")
+    file_filter = Gtk.FileFilter(name=f"{kind.capitalize()} JSON")
     file_filter.add_pattern("*.json")
     dialog.add_filter(file_filter)
 

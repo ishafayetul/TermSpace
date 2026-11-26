@@ -2,18 +2,18 @@
 
 TermSpace is a native Ubuntu terminal workspace manager built with Python, PyGObject, GTK 4 and VTE. Each pane runs a real shell on an independent Linux PTY. The application works offline and has no account, telemetry, update service or network listener.
 
-![TermSpace on Ubuntu showing a four-pane workspace](docs/termspace-x11.png)
+![TermSpace on Ubuntu showing the Tokyo Night theme and three split panes](docs/termspace-x11.png)
 
-The running GTK application with a four-pane layout and demonstration terminal output.
+The running GTK application with a three-pane workspace, demonstration output and a font zoom indicator.
 
 ## Install on Ubuntu 24.04 LTS
 
-Download `termspace_1.0.0_all.deb` and `termspace_1.0.0_all.deb.sha256` from the [v1.0.0 release](https://github.com/ishafayetul/TermSpace/releases/tag/v1.0.0). Run the following commands in the download directory. For a local build, use the `dist/` directory.
+Download `termspace_1.1.0_all.deb` and `termspace_1.1.0_all.deb.sha256` from the [v1.1.0 release](https://github.com/ishafayetul/TermSpace/releases/tag/v1.1.0). Run the following commands in the download directory. For a local build, use the `dist/` directory.
 
 ```bash
-sha256sum -c termspace_1.0.0_all.deb.sha256
+sha256sum -c termspace_1.1.0_all.deb.sha256
 sudo apt update
-sudo apt install ./termspace_1.0.0_all.deb
+sudo apt install ./termspace_1.1.0_all.deb
 termspace
 ```
 
@@ -57,13 +57,24 @@ Opening from the CLI or automatic restore skips startup commands. The GUI refuse
 - Right-click a tab to rename it, change its accent, duplicate its layout, move it to a new window, save it as a workspace, or close tabs. Drag tabs to reorder them.
 - Use a pane's menu for copying, reviewed paste, searching, renaming, editing startup commands, splitting, moving or swapping, clearing scrollback and resetting the terminal.
 - Drag split dividers to resize panes. Maximizing, swapping and moving panes preserve their running shells. Duplicating creates new sessions.
-- Settings include dark, light and system appearance, eight terminal color schemes, font and cursor profiles, optional headers, optional status text and adjustable resource limits.
+- Settings include optional pane headers, status text and adjustable resource limits.
+- Use **Settings → Appearance → Terminal background opacity (%)** and the **−** or **+** buttons to adjust all terminal backgrounds. Use 100% for a solid background. Transparency requires a desktop compositor.
+
+## Themes and terminal fonts
+
+**Settings → Themes** previews and immediately applies the application theme. Tokyo Night is the default. System theme follows Ubuntu’s light or dark preference. Use the tab or pane menu to choose a terminal-only theme. Pane settings take precedence over tab settings, followed by the workspace and application themes. **Apply to all terminals** clears theme overrides in open windows.
+
+The theme editor supports creating, editing, renaming, duplicating, deleting, importing and exporting custom themes. Custom theme JSON is limited to 16 KiB and accepts only declared color, font, cursor and spacing fields.
+
+**Settings → Appearance** controls the terminal font, spacing, cursor, padding and zoom. TermSpace uses JetBrains Mono when installed in automatic mode and falls back to system monospace. Zoom defaults to 1 pt per action between 6 and 40 pt. It can target the focused pane, the current tab including nested splits, or every terminal across open windows. New splits inherit the parent size. **Reset all pane sizes** restores each terminal’s configured default.
+
+Use **Apply to this workspace** to set typography for the current window, or **Use in this workspace** in Themes to set its theme. Save or update the workspace to retain these choices.
 
 ## Workspaces and profiles
 
 Save the current window or an individual tab as a workspace. Manage workspaces from the header menu. Open in the current window or a new window, update, rename, duplicate, delete, export, import or make a workspace the default. The [robotics example](docs/examples/robotics.json) provides four panes for ROS 2 Bringup, Gazebo Simulation, Navigation and Topic Monitoring.
 
-Workspaces capture tree structure, split ratios, names, accents, shell profile references, directories and window dimensions. Layout restoration creates fresh PTYs. Saved shell profiles can configure executable, arguments, initial directory, fonts, ANSI colors, cursor, scrollback, bell, accents and environment overrides. Built-in Bash, Zsh and Fish profiles appear when the corresponding executables are available.
+Workspaces capture tree structure, split ratios, names, accents, shell profile references, directories, window dimensions, appearance settings and per-pane font sizes. Layout restoration creates fresh PTYs. Saved shell profiles can configure executable, arguments, initial directory, fonts, ANSI colors, cursor, scrollback, bell, accents and environment overrides. Built-in Bash, Zsh and Fish profiles appear when the corresponding executables are available.
 
 Imported workspaces use Default Shell and discard startup commands and any recognized per-pane trust flags. The import review shows the directories that would be used when a workspace is opened. Exports may contain commands and local paths. Profile definitions stay local. When a local workspace contains startup commands, the opening dialog shows the exact script, target pane, directory, shell and arguments. You can skip execution, cancel, or approve that single opening. An authorized script occupies its pane until it exits.
 
@@ -78,7 +89,9 @@ Imported workspaces use Default Shell and discard startup commands and any recog
 | Ctrl+Shift+S | Save workspace |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
 | Alt+Arrow | Focus a pane in that direction |
-| Ctrl+Plus / Minus / 0 | Increase / decrease / reset font size |
+| Ctrl+Plus, Ctrl+Equal, Ctrl+Numpad Plus, Ctrl+Wheel Up | Increase terminal font size |
+| Ctrl+Minus, Ctrl+Numpad Minus, Ctrl+Wheel Down | Decrease terminal font size |
+| Ctrl+0, Ctrl+Numpad 0 | Reset terminal font size |
 | F11 | Toggle fullscreen |
 
 Shortcuts are editable in Settings. TermSpace reserves terminal control keys and rejects duplicate bindings. Shift+Insert and middle-click review the primary selection, and Ctrl+Shift+Insert reviews the regular clipboard. Search defaults to literal matching. Simple regex search is bounded and supports case sensitivity and next/previous results.
@@ -87,7 +100,7 @@ Shortcuts are editable in Settings. TermSpace reserves terminal control keys and
 
 | Location | Contents |
 | --- | --- |
-| `$XDG_CONFIG_HOME/termspace/catalog.json` | Preferences, local profiles and workspaces |
+| `$XDG_CONFIG_HOME/termspace/catalog.json` | Preferences, custom themes, local profiles and workspaces |
 | `$XDG_STATE_HOME/termspace/layout.json` | Last closed window layout, when enabled |
 
 The defaults are `~/.config/termspace` and `~/.local/state/termspace`. TermSpace expects mode `0700` on its directories and `0600` on private files. It preserves files that fail access or JSON checks. If a configuration is corrupt, exit TermSpace and move the affected file to a backup path before reopening. If the system GTK/VTE libraries are missing, run the dependency checker and use Ubuntu's package manager.

@@ -30,6 +30,28 @@ For Wayland, launch the second command from an isolated Wayland session or set `
 
 GTK 4.14 emits deprecation notices for some stable GTK APIs used by the source. VTE 0.76's GTK4 `set_pty(None)` path crashed during development. The implementation disposes the unparented widget through GObject. Live tests verify that VTE reaps its managed children using that path.
 
+## Appearance redesign verification
+
+Executed on Ubuntu 24.04.5 with GTK 4.14.5 and VTE 0.76.0. X11 passed 33 tests. Headless GNOME Wayland passed 32 and skipped the X11-only input case.
+
+| Check | Result |
+| --- | --- |
+| Native input on isolated X11 | Ctrl+Plus, Equal, Minus and 0, keypad variants, Ctrl+wheel in both directions, French AZERTY reset, disabled bindings, shortcut conflict detection, and divider drag |
+| Zoom and persistence | Independent panes, nested splits, tab and all-window scopes, split inheritance, new-tab defaults, 6–40 pt limits, reset all, workspace restore, and PTY row/column updates without window resizing |
+| Live theme switching | All built-in choices, GNOME light/dark preference changes, nested panes and multiple tabs, running Nano, Htop and Vim Tiny, retained shell processes and output |
+| Package-manager simulation | Theme changes overlapped a running `apt-get -s --no-download install`. The simulation completed with the same shell PID, PTY and prior output. |
+| Theme security | Valid JSON round-trip, rejected executable and unsupported fields, invalid colors and fonts, oversized and malformed JSON, symlink components, traversal and overwrite attempts. Existing storage, clipboard and workspace security tests also passed. |
+| Startup and idle network trace | No IPv4 or IPv6 socket operations or listeners observed on isolated X11. |
+
+Three-run medians on the same Xvfb/Cairo setup, compared with the tracked version before the redesign.
+
+| Panes | Startup, before → after | Idle CPU, before → after | RSS, before → after |
+| --- | ---: | ---: | ---: |
+| 1 | 235 → 231 ms | 0.08 → 0.10% | 174.0 → 174.9 MiB |
+| 16 | 441 → 461 ms | 0.14 → 0.10% | 185.0 → 188.6 MiB |
+
+Live Tmux, a real package installation, physical Wayland input, and screen readers remain unverified. VTE manages terminal selection through reflow. Workspaces reference custom themes by name, so a workspace moved to another installation needs the corresponding theme JSON for the same appearance.
+
 ## Measurements
 
 Xvfb with the Cairo renderer. Startup runs from the benchmark's Python entry point until Bash prints a readiness marker in every pane. CPU is TermSpace process time over a two-second idle interval. Memory is the application process's `smaps_rollup`, excluding child shells. PSS apportions shared pages.

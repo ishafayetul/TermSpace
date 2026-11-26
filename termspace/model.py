@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
+from . import themes
+
 HARD_LIMITS = {"windows": 12, "tabs": 32, "panes": 96, "depth": 12,
                "scrollback": 100_000, "file_bytes": 1_048_576}
 LIMITS = {"windows": 6, "tabs": 16, "panes": 48, "depth": 8,
@@ -29,10 +31,11 @@ SHORTCUTS = {
     "zoom-in": "<Ctrl>plus", "zoom-out": "<Ctrl>minus", "zoom-reset": "<Ctrl>0",
     "fullscreen": "F11",
 }
-THEMES = ("Ubuntu", "Dracula", "Nord", "Gruvbox", "Solarized Dark",
-          "Monokai", "Tokyo Night", "One Dark")
+THEMES = (*themes.NAMES, *themes.ALIASES)
 SETTINGS = {
-    "theme": "dark", "scheme": "Ubuntu", "status_bar": True, "pane_headers": True,
+    "theme": "dark", "scheme": themes.DEFAULT, "app_theme": "", "appearance": {},
+    "status_bar": True, "pane_headers": True,
+    "background_opacity": 100,
     "confirm_close": True, "hyperlinks": False, "restore_layout": False,
     "inherit_directory": True, "split_direction": "left-right",
     "default_workspace": "", "default_profile": DEFAULT_PROFILE,
@@ -185,11 +188,61 @@ def profile(data: dict, *, check_paths: bool = True) -> dict:
     return result
 
 
+def font_family(value: object) -> str:
+    name = string(value, 80)
+    require(not name or name.strip() == name and
+            all(c.isalnum() or c in " -_.+" for c in name) and any(c.isalnum() for c in name),
+            "Use a plain font family name.")
+    return name
+
+
+def appearance(data: dict) -> dict:
+    mapping(data, set(themes.APPEARANCE))
+    for key, value in data.items():
+        if key in themes.FONT_RANGES:
+            integer(value, *themes.FONT_RANGES[key])
+        elif key in themes.FONT_CHOICES:
+            require(value in themes.FONT_CHOICES[key], "Invalid appearance choice.")
+        elif key == "font":
+            font_family(value)
+        else:
+            require(type(value) is bool, "Invalid appearance toggle.")
+    return data
+
+
+def theme_name(value: object) -> str:
+    return label(value, empty=True)
+
+
+def custom_theme(data: dict) -> dict:
+    keys = set(themes.BUILTINS[themes.DEFAULT])
+    mapping(data, keys)
+    require(data.keys() == keys, "Theme fields are missing.")
+    for key in themes.COLOR_FIELDS:
+        require(bool(color(data[key])), "Theme colors are required.")
+    require(type(data["ansi"]) is list and len(data["ansi"]) == 16 and
+            all(color(value) for value in data["ansi"]), "A theme requires 16 ANSI colors.")
+    for key, (_, low, high) in themes.GEOMETRY.items():
+        integer(data[key], low, high)
+    appearance({key: data[key] for key in ("font", "font_size", "cursor", "blink")})
+    return data
+
+
+def theme_document(data: dict) -> tuple[str, dict]:
+    mapping(data, {"schema_version", "name", "theme"})
+    require(type(data.get("schema_version")) is int and data["schema_version"] == 1,
+            "Unsupported theme schema.")
+    return label(data.get("name")), custom_theme(data.get("theme"))
+
+
 def settings(data: dict) -> dict:
     mapping(data, set(SETTINGS))
     result = SETTINGS | data
     require(result["theme"] in ("dark", "light", "system") and result["scheme"] in THEMES,
             "Invalid theme or color scheme.")
+    theme_name(result["app_theme"])
+    appearance(result["appearance"])
+    integer(result["background_opacity"], 0, 100)
     for key, default in SETTINGS.items():
         if type(default) is bool:
             require(type(result[key]) is bool, "Invalid setting toggle.")
@@ -211,7 +264,8 @@ def settings(data: dict) -> dict:
 
 def leaf(cwd: str = "", profile_name: str = DEFAULT_PROFILE, **fields: object) -> dict:
     return {"type": "terminal", "id": uuid4().hex, "name": "", "accent": "",
-            "working_directory": cwd, "profile": profile_name, "startup_commands": [], **fields}
+            "working_directory": cwd, "profile": profile_name, "startup_commands": [],
+            "terminal_theme": "", "font_size": 0, **fields}
 
 
 def leaves(tree: dict):
@@ -223,7 +277,8 @@ def leaves(tree: dict):
 
 
 def workspace(data: dict, limits: dict = LIMITS, *, imported: bool = False) -> dict:
-    mapping(data, {"schema_version", "name", "window_title", "tabs", "width", "height", "maximized"})
+    mapping(data, {"schema_version", "name", "window_title", "tabs", "width", "height", "maximized",
+                   "terminal_theme", "appearance"})
     require(type(data.get("schema_version")) is int and data["schema_version"] == 1,
             "Unsupported workspace schema.")
     seen: set[str] = set()
@@ -243,9 +298,14 @@ def workspace(data: dict, limits: dict = LIMITS, *, imported: bool = False) -> d
                 string(cwd, 4096)
             profile_name = label(node.get("profile", DEFAULT_PROFILE))
             startup = commands(node.get("startup_commands", []))
+            size = node.get("font_size", 0)
+            require(type(size) is int and (size == 0 or themes.FONT_SIZE[0] <= size <= themes.FONT_SIZE[1]),
+                    "Pane font size is outside the supported range.")
             return leaf(cwd, DEFAULT_PROFILE if imported else profile_name, id=ident,
                         name=label(node.get("name", ""), empty=True), accent=color(node.get("accent", "")),
-                        startup_commands=[] if imported else startup)
+                        startup_commands=[] if imported else startup,
+                        terminal_theme=theme_name(node.get("terminal_theme", "")),
+                        font_size=size)
         mapping(node, {"type", "orientation", "ratio", "children"})
         require(node.get("type") == "split" and node.get("orientation") in ("left-right", "top-bottom"),
                 "Invalid split orientation.")
@@ -259,15 +319,18 @@ def workspace(data: dict, limits: dict = LIMITS, *, imported: bool = False) -> d
     require(type(tabs) is list and 0 < len(tabs) <= limits["tabs"], "Invalid number of workspace tabs.")
     validated = []
     for tab in tabs:
-        mapping(tab, {"name", "accent", "layout"})
+        mapping(tab, {"name", "accent", "layout", "terminal_theme"})
         validated.append({"name": label(tab.get("name", ""), empty=True),
-                          "accent": color(tab.get("accent", "")), "layout": layout(tab.get("layout"), 1)})
+                          "accent": color(tab.get("accent", "")), "layout": layout(tab.get("layout"), 1),
+                          "terminal_theme": theme_name(tab.get("terminal_theme", ""))})
     maximized = data.get("maximized", False)
     require(type(maximized) is bool, "Invalid maximized setting.")
     return {"schema_version": 1, "name": label(data.get("name")),
             "window_title": label(data.get("window_title", ""), empty=True), "tabs": validated,
             "width": integer(data.get("width", 1100), 420, 8192),
-            "height": integer(data.get("height", 700), 280, 8192), "maximized": maximized}
+            "height": integer(data.get("height", 700), 280, 8192), "maximized": maximized,
+            "terminal_theme": theme_name(data.get("terminal_theme", "")),
+            "appearance": appearance(data.get("appearance", {}))}
 
 
 def decode(raw: bytes, limit: int) -> dict:

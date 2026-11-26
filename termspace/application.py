@@ -4,13 +4,14 @@ import json
 import os
 import platform
 from pathlib import Path
+from string import Template
 
 import gi
 
-from . import APP_ID, VERSION, model
+from . import APP_ID, VERSION, appearance, model, themes
 from .dialogs import ask, choose_file, message, prompt
 from .layout import panes
-from .native import Gio, GLib, Gtk, Vte
+from .native import Gdk, Gio, GLib, Gtk, Vte
 from .preferences import accelerator_map, preferences, select
 from .store import Store, catalog, export_file, import_file, xdg
 from .window import Window
@@ -35,11 +36,17 @@ class Application(Gtk.Application):
 
     def do_startup(self) -> None:
         Gtk.Application.do_startup(self)
-        provider = Gtk.CssProvider()
-        provider.load_from_path(str(Path(__file__).with_name("style.css")))
-        from .native import Gdk
-        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
+        self.styles = Gtk.CssProvider()
+        self.stylesheet = Template(Path(__file__).with_name("style.css").read_text())
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), self.styles,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        gtk = Gtk.Settings.get_default()
+        schemas = Gio.SettingsSchemaSource.get_default()
+        schema = schemas.lookup("org.gnome.desktop.interface", True) if schemas else None
+        self.desktop = Gio.Settings.new_full(schema, None, None) if schema and schema.has_key("color-scheme") else None
+        if self.desktop:
+            self.desktop.connect("changed::color-scheme", lambda *_: self.apply_theme())
+        gtk.connect("notify::gtk-theme-name", lambda *_: self.apply_theme())
         try:
             self.load_catalog(catalog(self.config.load()))
         except (OSError, model.Invalid) as exc:
@@ -114,6 +121,7 @@ class Application(Gtk.Application):
         self.started = True
         window = Window(self, data, commands, cwd=cwd, blank=blank)
         window.present()
+        self.refresh_styles()
         if (active := window.current()) is not None:
             active.focus()
         if self.startup_error:
@@ -133,9 +141,12 @@ class Application(Gtk.Application):
         target.attach(tab)
         target.notebook.set_current_page(0)
         tab.focus()
+        for pane in panes(tab.tree):
+            pane.apply_settings()
         if not source.tabs:
             source.dispose_sessions()
             source.destroy()
+            self.refresh_styles()
 
     def builtin_profiles(self) -> dict:
         named = {name: model.PROFILE | {"shell": executable}
@@ -176,26 +187,109 @@ class Application(Gtk.Application):
             print(f"TermSpace: {self.error_text(exc)}", file=sys.stderr)
 
     def load_catalog(self, value: dict) -> None:
-        keys = accelerator_map(value["settings"]["shortcuts"])
-        self.catalog, self.settings, self.keys = value, value["settings"], keys
+        settings = model.settings(value["settings"])
+        keys = accelerator_map(settings["shortcuts"])
+        self.catalog, self.settings, self.keys = value | {"settings": settings}, settings, keys
 
     def transaction(self, change) -> None:
         def mutate(raw):
             value = catalog(raw)
             accelerator_map(value["settings"]["shortcuts"])
             change(value)
-            catalog(value)
+            value = catalog(value)
+            if value["settings"]["background_opacity"] == 100:
+                # Omit the default so older releases can still read the catalog.
+                del value["settings"]["background_opacity"]
             return value
         self.load_catalog(self.config.update(mutate))
 
+    def available_themes(self):
+        return (*themes.NAMES, *sorted(self.catalog.get("themes", {}), key=str.casefold))
+
+    def system_dark(self):
+        if self.desktop:
+            scheme = self.desktop.get_string("color-scheme")
+            if scheme != "default":
+                return scheme == "prefer-dark"
+        return Gtk.Settings.get_default().get_property("gtk-theme-name").lower().endswith("-dark")
+
+    def theme(self, name):
+        if name == themes.SYSTEM:
+            name = themes.DEFAULT if self.system_dark() else "Light"
+        name = themes.ALIASES.get(name, name)
+        return self.catalog.get("themes", {}).get(name) or themes.BUILTINS.get(name)
+
+    def app_theme_name(self):
+        config = self.settings
+        return config["app_theme"] or {"light": "Light", "system": themes.SYSTEM}.get(
+            config["theme"], themes.ALIASES.get(config["scheme"], config["scheme"]))
+
+    def refresh_styles(self):
+        theme = self.theme(self.app_theme_name()) or themes.BUILTINS[themes.DEFAULT]
+        css = [self.stylesheet.substitute(theme, scope="", root="")]
+        for window in self.windows():
+            if override := self.theme(window.theme_name):
+                scope = "." + window.style_name
+                css.append(self.stylesheet.substitute(override, scope=scope, root="window" + scope + " "))
+        css.extend(appearance.scrollbar_css(value) for value in
+                   (*themes.BUILTINS.values(), *self.catalog.get("themes", {}).values()))
+        source = "\n".join(css)
+        if getattr(self, "current_css", None) != source:
+            self.styles.load_from_string(source)
+            self.current_css = source
+
     def apply_theme(self) -> None:
-        settings = Gtk.Settings.get_default()
-        if self.settings["theme"] == "system":
-            settings.reset_property("gtk-application-prefer-dark-theme")
-        else:
-            settings.set_property("gtk-application-prefer-dark-theme", self.settings["theme"] == "dark")
+        theme = self.theme(self.app_theme_name()) or themes.BUILTINS[themes.DEFAULT]
+        background = theme["window"]
+        # Match GTK's native controls to the theme's background luminance.
+        dark = sum(int(background[i:i + 2], 16) * weight
+                   for i, weight in ((1, .2126), (3, .7152), (5, .0722))) < 128
+        gtk = Gtk.Settings.get_default()
+        if gtk.get_property("gtk-application-prefer-dark-theme") != dark:
+            gtk.set_property("gtk-application-prefer-dark-theme", dark)
+        self.refresh_styles()
         for window in self.windows():
             window.apply_settings()
+
+    def set_theme(self, name, original="", data=None):
+        if data is not None:
+            model.custom_theme(data)
+            model.require(model.label(name) == name and name not in themes.NAMES and name not in themes.ALIASES,
+                          "Choose a name distinct from built-in themes.")
+
+        def update(value):
+            entries = value["themes"]
+            if original:
+                model.require(original in entries, "This custom theme was already removed.")
+            if data is not None:
+                model.require(name not in entries or name == original, "A theme with this name exists.")
+                entries[name] = data
+            if original and original != name:
+                del entries[original]
+                if value["settings"]["app_theme"] == original:
+                    value["settings"]["app_theme"] = name
+                for workspace in value["workspaces"].values():
+                    self.replace_theme_refs(workspace, original, name)
+
+        self.transaction(update)
+        if original and original != name:
+            for window in self.windows():
+                if window.theme_name == original:
+                    window.theme_name = name
+                for tab in window.tabs:
+                    for data in (tab.data, *(pane.data for pane in panes(tab.tree))):
+                        if data.get("terminal_theme") == original:
+                            data["terminal_theme"] = name
+        self.apply_theme()
+
+    @staticmethod
+    def replace_theme_refs(workspace, original, name):
+        if workspace.get("terminal_theme") == original:
+            workspace["terminal_theme"] = name
+        for tab in workspace["tabs"]:
+            for data in (tab, *model.leaves(tab["layout"])):
+                if data.get("terminal_theme") == original:
+                    data["terminal_theme"] = name
 
     def preferences(self, parent) -> None:
         preferences(self, parent)
@@ -235,7 +329,7 @@ class Application(Gtk.Application):
         if not self.settings["restore_layout"] or not window.tabs:
             return
         try:
-            snapshot = model.workspace(window.snapshot("Previous layout"), self.settings["limits"])
+            snapshot = model.workspace(window.snapshot(window.workspace_name or "Previous layout"), self.settings["limits"])
             self.state.update(lambda _value: snapshot)
         except (OSError, model.Invalid) as exc:
             self.startup_error = self.error_text(exc)
@@ -277,6 +371,9 @@ class Application(Gtk.Application):
                     for tab in parent.tabs[:]:
                         parent.detach_tab(tab)
                         tab.close()
+                    parent.workspace_name = workspace["name"]
+                    parent.theme_name = workspace["terminal_theme"]
+                    parent.appearance = workspace["appearance"]
                     parent.title_text = workspace["window_title"]
                     parent.set_title(parent.title_text or "TermSpace")
                     parent.set_default_size(workspace["width"], workspace["height"])
@@ -284,6 +381,7 @@ class Application(Gtk.Application):
                     for tab in workspace["tabs"]:
                         parent.add_tab(tab, commands=prepared if approved else None, focus=False)
                     parent.notebook.set_current_page(0)
+                    self.refresh_styles()
                 except (OSError, model.Invalid) as exc:
                     if not parent:
                         raise
@@ -304,14 +402,19 @@ class Application(Gtk.Application):
 
     def save_workspace(self, parent, tab=None, *, update=""):
         def save(name):
-            self.workspace_operation(parent, lambda: self.put_workspace(parent.snapshot(model.label(name), tab),
-                                                                        replace=update))
+            def store():
+                clean = model.label(name)
+                self.put_workspace(parent.snapshot(clean, tab), replace=update)
+                if tab is None:
+                    parent.workspace_name = clean
+                    parent.refresh_status()
+            self.workspace_operation(parent, store)
         if update:
             ask(parent, "Update workspace?", f"Replace the saved layout for {update} with this window?",
                 [(Gtk.ResponseType.CANCEL, "Cancel"), (1, "Update")],
                 lambda answer, _: save(update) if answer == 1 else None)
         else:
-            prompt(parent, "Save workspace", "", save, "Save the layout, profiles, and working directories.")
+            prompt(parent, "Save workspace", "", save, "Save the layout, profiles, and appearance.")
 
     def put_workspace(self, data, *, replace=""):
         clean = model.workspace(data, self.settings["limits"])
@@ -328,11 +431,11 @@ class Application(Gtk.Application):
             workspaces[name] = clean
         self.transaction(change)
 
-    def workspace_operation(self, parent, callback):
+    def workspace_operation(self, parent, callback, *, title="Workspace action failed"):
         try:
             return callback()
         except (OSError, model.Invalid) as exc:
-            self.error(parent, "Workspace action failed", exc)
+            self.error(parent, title, exc)
             return None
 
     def workspace_manager(self, parent):

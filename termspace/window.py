@@ -1,9 +1,13 @@
 """Application window, focus, tabs and pane actions."""
 
-from . import model
+from uuid import uuid4
+
+from . import model, themes
 from .dialogs import ask, message, prompt
 from .layout import Tab, Split, button, menu, panes, replace
 from .native import Gdk, Gio, GLib, Gtk, Pango, Vte
+from .preferences import accelerator_pair
+from .terminal import background_alpha
 
 
 class Window(Gtk.ApplicationWindow):
@@ -11,6 +15,12 @@ class Window(Gtk.ApplicationWindow):
                  *, cwd: str = "", blank: bool = False):
         super().__init__(application=app, title="TermSpace")
         self.app = app
+        self.workspace_name = (data or {}).get("name", "")
+        self.theme_name = (data or {}).get("terminal_theme", "")
+        self.appearance = (data or {}).get("appearance", {})
+        self.style_name = "workspace-" + uuid4().hex
+        self.add_css_class(self.style_name)
+        self.update_background_style()
         self.title_text = (data or {}).get("window_title", "")
         self.set_title(self.title_text or "TermSpace")
         self.set_default_size((data or {}).get("width", 1100), (data or {}).get("height", 700))
@@ -30,7 +40,7 @@ class Window(Gtk.ApplicationWindow):
         header.pack_start(button("tab-new-symbolic", "New tab", self.add_tab))
         header.pack_start(button("view-dual-symbolic", "Split focused pane",
                                  lambda: self.perform("split-default")))
-        self.quick = Gtk.MenuButton(icon_name="pan-down-symbolic", tooltip_text="Window and workspace actions",
+        self.quick = Gtk.MenuButton(icon_name="open-menu-symbolic", tooltip_text="Window and workspace actions",
                                     css_classes=["flat"])
         self.quick.update_property([Gtk.AccessibleProperty.LABEL], ["Window and workspace actions"])
         self.quick.set_menu_model(menu(self.quick, "quick", [
@@ -44,7 +54,7 @@ class Window(Gtk.ApplicationWindow):
             ("Fullscreen", lambda: self.perform("fullscreen")),
             ("About TermSpace", lambda: self.app.about(self)),
         ]))
-        header.pack_end(button("emblem-system-symbolic", "Settings", lambda: self.app.preferences(self)))
+        header.pack_end(button("preferences-system-symbolic", "Settings", lambda: self.app.preferences(self)))
         header.pack_end(self.quick)
         self.notebook = Gtk.Notebook(scrollable=True, hexpand=True, vexpand=True, css_classes=["terminal-tabs"])
         self.notebook.connect("switch-page", self.switched)
@@ -53,8 +63,8 @@ class Window(Gtk.ApplicationWindow):
         self.build_search()
         status = Gtk.Box(spacing=10, css_classes=["status-bar"])
         status.append(Gtk.Image(icon_name="utilities-terminal-symbolic"))
-        self.status = Gtk.Label(xalign=0, hexpand=True)
-        self.session_state = Gtk.Label(xalign=1, css_classes=["dim-label"])
+        self.status = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+        self.session_state = Gtk.Label(xalign=1)
         status.append(self.status)
         status.append(self.session_state)
         self.layout.append(status)
@@ -83,13 +93,12 @@ class Window(Gtk.ApplicationWindow):
 
     def key(self, _controller, key, _code, modifiers) -> bool:
         masked = modifiers & Gtk.accelerator_get_default_mod_mask()
-        key = Gdk.keyval_to_lower(key)
-        if key == Gdk.KEY_ISO_Left_Tab:
-            key = Gdk.KEY_Tab
-        action = self.app.keys.get((key, int(masked)))
-        # Ctrl+plus often arrives with Shift on physical keyboards.
-        if not action and key == Gdk.KEY_plus:
-            action = self.app.keys.get((key, int(masked & ~Gdk.ModifierType.SHIFT_MASK)))
+        action = self.app.keys.get(accelerator_pair(key, masked))
+        control = Gdk.ModifierType.CONTROL_MASK
+        shift = Gdk.ModifierType.SHIFT_MASK
+        if not action and masked == (control | shift) and key in (Gdk.KEY_equal, Gdk.KEY_minus, Gdk.KEY_0):
+            # For example, the French AZERTY layout requires Shift to produce 0.
+            action = self.app.keys.get(accelerator_pair(key, control))
         if action:
             self.activate_action(f"win.{action}", None)
             return True
@@ -136,9 +145,40 @@ class Window(Gtk.ApplicationWindow):
             elif action.startswith("focus-"):
                 self.focus_direction(tab, action.removeprefix("focus-"))
             elif action in ("zoom-in", "zoom-out", "zoom-reset"):
-                scale = terminal.get_font_scale()
-                terminal.set_font_scale({"zoom-in": min(3, scale * 1.1), "zoom-out": max(.5, scale / 1.1),
-                                          "zoom-reset": 1}[action])
+                self.zoom(action)
+
+    def zoom(self, action, *, reset_all=False):
+        tab = self.current()
+        pane = tab.active if tab else None
+        settings = themes.APPEARANCE | self.app.settings["appearance"] | self.appearance
+        scope = "All Terminals" if reset_all else settings["zoom_scope"]
+        if scope == "All Terminals":
+            targets = (item for window in self.app.windows() for page in window.tabs for item in panes(page.tree))
+        elif not pane:
+            return
+        else:
+            targets = panes(tab.tree) if scope == "Current Tab" else (pane,)
+        for item in targets:
+            if action == "zoom-reset":
+                window = item.tab.window
+                theme, _, _ = item.appearance()
+                size = (window.appearance.get("font_size") or self.app.settings["appearance"].get("font_size")
+                        or theme["font_size"])
+            else:
+                step = settings["zoom_step"] * (1 if action == "zoom-in" else -1)
+                size = item.session.font_options["font_size"] + step
+            item.session.set_font_size(max(themes.FONT_SIZE[0], min(themes.FONT_SIZE[1], size)))
+        if pane:
+            pane.show_zoom()
+
+    def choose_terminal_theme(self, data, refresh):
+        from .preferences import select
+        names = self.app.available_themes()
+
+        def change(index):
+            data["terminal_theme"] = ("", *names)[index]
+            refresh()
+        select(self, "Terminal theme", ["Inherit theme", *names], "Apply", change)
 
     def focus_direction(self, tab: Tab, direction: str):
         if tab.maximized:
@@ -183,6 +223,7 @@ class Window(Gtk.ApplicationWindow):
         tab.window = self
         self.tabs.append(tab)
         self.notebook.append_page(tab.page, tab.label)
+        self.notebook.get_page(tab.page).set_property("tab-expand", True)
         self.notebook.set_tab_reorderable(tab.page, True)
         self.refresh_status()
 
@@ -204,10 +245,15 @@ class Window(Gtk.ApplicationWindow):
         tab = self.current()
         pane = tab.active if tab else None
         count = sum(session.session.state in ("running", "starting") for tab in self.tabs for session in panes(tab.tree))
-        self.status.set_text(f"{count} active terminal" + ("" if count == 1 else "s"))
+        workspace = self.workspace_name or "Unsaved workspace"
+        self.status.set_text(f"{workspace}   ·   {count} active terminal" + ("" if count == 1 else "s"))
+        for state in ("running", "starting", "failed", "exited"):
+            self.session_state.remove_css_class(f"session-{state}")
+        if pane:
+            self.session_state.add_css_class(f"session-{pane.session.state}")
         self.session_state.set_text((f"{model.title(pane.session.shell.rsplit('/', 1)[-1], 'Shell')}  ·  "
                                      f"{pane.session.state.capitalize()}") if pane else "")
-        self.status.set_tooltip_text("Active terminal processes in this window")
+        self.status.set_tooltip_text(self.status.get_text())
 
     def switched(self, _notebook, child, _index) -> None:
         tab = next((tab for tab in self.tabs if tab.page is child), None)
@@ -301,6 +347,7 @@ class Window(Gtk.ApplicationWindow):
             self.app.remember_window(self)
             self.dispose_sessions()
             self.destroy()
+            self.app.refresh_styles()
         self.confirm([pane for tab in self.tabs for pane in panes(tab.tree)], close)
         return True
 
@@ -326,7 +373,7 @@ class Window(Gtk.ApplicationWindow):
                       button("go-down-symbolic", "Next search match", lambda: self.find(previous=False)),
                       button("window-close-symbolic", "Close search", self.hide_search)):
             self.search_box.append(child)
-        self.search_status = Gtk.Label(css_classes=["dim-label"], visible=False)
+        self.search_status = Gtk.Label(css_classes=["dim-label", "search-status"], visible=False)
         self.layout.append(self.search_box)
         self.layout.append(self.search_status)
 
@@ -395,6 +442,7 @@ class Window(Gtk.ApplicationWindow):
                 self.detach_tab(source)
                 source.close()
             pane.tab = target
+            pane.apply_settings()
             target.tree = replace(target.tree, anchor, Split(self.app.settings["split_direction"], .5, anchor, pane))
             target.mount()
             self.notebook.set_current_page(self.notebook.page_num(target.page))
@@ -417,11 +465,19 @@ class Window(Gtk.ApplicationWindow):
             width = self.get_width() or width
             height = self.get_height() or height
         return {"schema_version": 1, "name": name, "window_title": self.title_text,
+                "terminal_theme": self.theme_name, "appearance": self.appearance,
                 "width": max(420, width), "height": max(280, height), "maximized": self.is_maximized(),
                 "tabs": [item.snapshot() for item in ([tab] if tab else self.tabs)]}
 
+    def update_background_style(self) -> None:
+        if background_alpha(self.app.settings, self.get_display()) < 1:
+            self.add_css_class("translucent-terminal")
+        else:
+            self.remove_css_class("translucent-terminal")
+
     def apply_settings(self) -> None:
+        self.update_background_style()
         self.status_bar.set_visible(self.app.settings["status_bar"])
         for tab in self.tabs:
-            for pane in panes(tab.tree):
-                pane.apply_settings()
+            tab.apply_settings()
+        self.refresh_status()

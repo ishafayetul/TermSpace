@@ -1,3 +1,9 @@
+termspace (1.1.0) unstable; urgency=medium
+
+  * Redesign the GTK interface and add live themes and terminal font controls.
+
+ -- TermSpace contributors <35392326+ishafayetul@users.noreply.github.com>  Thu, 26 Nov 2026 14:28:27 +0000
+
 termspace (1.0.0) unstable; urgency=medium
 
   * Initial source and Ubuntu 24.04 package.

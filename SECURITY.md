@@ -8,6 +8,7 @@ TermSpace is a native terminal emulator. It is not a sandbox. Commands run with 
 | Terminal and SSH output | Malicious titles, window manipulation, clipboard access or link activation | VTE parser, sanitized plain text, no window-control callbacks, OSC 52 regression checks, hyperlinks off by default |
 | Clipboard | Invisible controls or pasted lines execute commands | Capture terminal paste routes, preview escaped controls, user choice, native bracketed paste |
 | Imported workspaces | Code, environment or trust injection and resource exhaustion | Bounded strict JSON, validated layout, default shell substitution, command stripping and import review |
+| Imported themes | Executable configuration, remote resources and unsafe file paths | Bounded, versioned JSON allowlist, validated colors and font names, descriptor-relative paths with no symlink components |
 | Local settings | Symlink substitution, corruption and concurrent lost updates | Descriptor-relative storage, ownership and mode checks, exclusive lock, atomic replacement |
 | Profiles | Executable, arguments and environment can change process behavior | Local profile edits require review, imports cannot select custom profiles, validate override names, keep secrets out |
 | Startup commands | Unintended execution | One-time consent shows exact text, pane and working directory, skip by default and on CLI launch |
@@ -19,7 +20,7 @@ Detached jobs can outlive their terminal. A same-user attacker, hostile shell st
 
 ## Updates and reporting
 
-The supported release is TermSpace 1.0.0 on Ubuntu 24.04 LTS. Use Ubuntu's security updates for Python, GTK, PyGObject, and VTE, and install TermSpace updates from [GitHub Releases](https://github.com/ishafayetul/TermSpace/releases). The Debian package requires at least VTE `0.76.0-1ubuntu0.1`, the Noble build containing the window-handling fix in [USN-6833-1](https://ubuntu.com/security/notices/USN-6833-1).
+The supported release is TermSpace 1.1.0 on Ubuntu 24.04 LTS. Use Ubuntu's security updates for Python, GTK, PyGObject, and VTE, and install TermSpace updates from [GitHub Releases](https://github.com/ishafayetul/TermSpace/releases). The Debian package requires at least VTE `0.76.0-1ubuntu0.1`, the Noble build containing the window-handling fix in [USN-6833-1](https://ubuntu.com/security/notices/USN-6833-1).
 
 Use the private reporting option on the [GitHub Security page](https://github.com/ishafayetul/TermSpace/security/advisories) when available. Otherwise, open a [GitHub issue](https://github.com/ishafayetul/TermSpace/issues) asking for a private reporting channel and omit vulnerability details from it. In a private report, include TermSpace, Ubuntu, GTK and VTE versions, the impact, and steps using synthetic data. Keep shell history, credentials, and private workspace files out of reports.
 

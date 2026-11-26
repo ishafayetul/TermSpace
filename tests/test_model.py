@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from termspace import model
+from termspace import model, themes
 from termspace.__main__ import main
 from termspace.store import Store, catalog, export_file, import_file
 
@@ -88,6 +88,59 @@ class SecurityTests(unittest.TestCase):
         for change in ({"limits": {"scrollback": -1}}, {"hyperlinks": 1}, {"theme": "x"}):
             with self.assertRaises(model.Invalid):
                 model.settings(change)
+
+    def test_background_opacity_is_a_percentage_and_defaults_to_opaque(self):
+        self.assertEqual(model.settings({})["background_opacity"], 100)
+        self.assertEqual(model.settings({"background_opacity": 0})["background_opacity"], 0)
+        for value in (-1, 101, True, "65", 65.5):
+            with self.subTest(value=value), self.assertRaises(model.Invalid):
+                model.settings({"background_opacity": value})
+
+
+class ThemeSecurityTests(unittest.TestCase):
+    def test_theme_schema_accepts_palettes_and_rejects_executable_or_malformed_data(self):
+        for theme in themes.BUILTINS.values():
+            self.assertEqual(model.custom_theme(theme), theme)
+        theme = themes.BUILTINS[themes.DEFAULT]
+        sample = {"schema_version": 1, "name": "Synthetic", "theme": theme}
+        self.assertEqual(model.theme_document(sample), ("Synthetic", theme))
+        for bad in ({"css": '@import "https://invalid.example/test";'},
+                    {"command": "echo synthetic"}, {"url": "https://invalid.example/theme"},
+                    {"terminal_bg": "#16161E; padding: 90px"}, {"font": "url(example)"},
+                    {"font": "../example"}, {"padding": -1}, {"radius": True},
+                    {"font_size": 41}, {"cursor": "beam"}, {"blink": "yes"},
+                    {"ansi": theme["ansi"][:-1]}, {"ansi": [""] * 16},
+                    {"window": ""}):
+            with self.subTest(key=next(iter(bad))), self.assertRaises(model.Invalid):
+                model.theme_document(sample | {"theme": theme | bad})
+        with self.assertRaises(model.Invalid):
+            model.theme_document(sample | {"schema_version": 2})
+
+    def test_theme_file_roundtrip_and_no_symlink_traversal(self):
+        sample = {"schema_version": 1, "name": "Synthetic", "theme": themes.BUILTINS["Nord"]}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "theme.json"
+            export_file(path, sample, themes.THEME_FILE_LIMIT, strict=True)
+            self.assertEqual(model.theme_document(import_file(path, themes.THEME_FILE_LIMIT, strict=True))[0],
+                             "Synthetic")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            link = Path(folder) / "link"
+            link.symlink_to(path)
+            parent = Path(folder) / "parent"
+            parent.symlink_to(folder, target_is_directory=True)
+            for unsafe in (link, parent / path.name, Path(folder) / ".." / Path(folder).name / path.name):
+                with self.subTest(name=unsafe.name), self.assertRaises((model.Invalid, OSError)):
+                    import_file(unsafe, themes.THEME_FILE_LIMIT, strict=True)
+            with self.assertRaises(OSError):
+                export_file(parent / "another.json", sample, themes.THEME_FILE_LIMIT, strict=True)
+            with self.assertRaises(OSError):
+                export_file(path, sample, themes.THEME_FILE_LIMIT, strict=True)
+            path.write_bytes(b" " * (themes.THEME_FILE_LIMIT + 1))
+            with self.assertRaises(model.Invalid):
+                import_file(path, themes.THEME_FILE_LIMIT, strict=True)
+            path.write_text('{"theme": {}, "theme": {}}')
+            with self.assertRaises(model.Invalid):
+                import_file(path, themes.THEME_FILE_LIMIT, strict=True)
 
 
 class StorageTests(unittest.TestCase):

@@ -3,32 +3,17 @@
 import os
 import re
 
-from . import model
+from . import appearance, model, themes
 from .dialogs import ask, message
-from .native import Gdk, Gio, GLib, GObject, Gtk, Pango, Vte
+from .native import Gdk, Gio, GLib, GObject, Gtk, Vte
 
 ORIENTATION = Gtk.Orientation
 CONTROL = Gdk.ModifierType.CONTROL_MASK
 SHIFT = Gdk.ModifierType.SHIFT_MASK
 PCRE_MULTILINE = 0x00000400
 PCRE_CASELESS = 0x00000008
-# Original palettes inspired by the named themes. The ANSI order follows VTE.
-PALETTES = {
-    "Ubuntu": ("#201927", "#eee8f0", "#d4779b", "#aa8ef0"),
-    "Dracula": ("#282a36", "#f8f8f2", "#ff79c6", "#bd93f9"),
-    "Nord": ("#2e3440", "#eceff4", "#bf616a", "#88c0d0"),
-    "Gruvbox": ("#282828", "#ebdbb2", "#fb4934", "#d79921"),
-    "Solarized Dark": ("#002b36", "#eee8d5", "#dc6871", "#47a6b8"),
-    "Monokai": ("#272822", "#f8f8f2", "#f92672", "#ae81ff"),
-    "Tokyo Night": ("#1a1b26", "#c0caf5", "#f7768e", "#7aa2f7"),
-    "One Dark": ("#282c34", "#e1e5eb", "#e06c75", "#61afef"),
-}
-
-
-def rgba(value: str):
-    result = Gdk.RGBA()
-    result.parse(value)
-    return result
+def background_alpha(settings: dict, display: Gdk.Display) -> float:
+    return settings["background_opacity"] / 100 if display.is_composited() else 1.0
 
 
 class Session:
@@ -51,7 +36,6 @@ class Session:
         terminal.set_enable_sixel(False)
         terminal.set_scroll_on_keystroke(True)
         terminal.set_mouse_autohide(True)
-        self.configure(settings)
         self.signals = [
             terminal.connect("child-exited", self.exited),
             terminal.connect("window-title-changed", lambda *_: self.changed()),
@@ -68,35 +52,40 @@ class Session:
         self.mouse.connect("pressed", self.middle)
         terminal.add_controller(self.mouse)
         if start:
+            self.configure(settings)
+            self.apply_appearance(themes.BUILTINS[themes.DEFAULT], themes.APPEARANCE, settings)
             self.spawn(startup)
 
     def configure(self, settings: dict) -> None:
         terminal = self.terminal
         profile = self.profile
         terminal.set_allow_hyperlink(settings["hyperlinks"])
-        terminal.set_scrollback_lines(min(profile["scrollback"], settings["limits"]["scrollback"]))
+        scrollback = min(profile["scrollback"], settings["limits"]["scrollback"])
+        if terminal.get_scrollback_lines() != scrollback:
+            terminal.set_scrollback_lines(scrollback)
         terminal.set_audible_bell(profile["bell"])
-        terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.ON if profile["blink"] else Vte.CursorBlinkMode.OFF)
-        terminal.set_cursor_shape({"block": Vte.CursorShape.BLOCK, "ibeam": Vte.CursorShape.IBEAM,
-                                   "underline": Vte.CursorShape.UNDERLINE}[profile["cursor"]])
-        font = Pango.FontDescription()
-        font.set_family(profile["font"])
-        font.set_size(profile["font_size"] * Pango.SCALE)
-        terminal.set_font(font)
-        background, foreground, red, accent = PALETTES[settings["scheme"]]
-        gtk = Gtk.Settings.get_default()
-        named_dark = gtk and gtk.get_property("gtk-theme-name").lower().endswith("-dark")
-        if settings["theme"] == "light" or (settings["theme"] == "system" and gtk
-                and not gtk.get_property("gtk-application-prefer-dark-theme") and not named_dark):
-            background, foreground, red, accent = "#f6f3f9", "#302839", "#aa294e", "#5540a0"
-            palette = [foreground, red, "#256a41", "#815807", accent, "#8b368d", "#226874", "#675d73"]
-            palette = palette + palette
-        else:
-            palette = ["#3e3749", red, "#98c79f", "#e9c17f", accent, "#df9bdf", "#85c8d5", foreground,
-                       "#9287a4", red, "#b5e0ad", "#ffe0a1", accent, "#eec1f2", "#b4e0eb", "#ffffff"]
-        terminal.set_colors(rgba(profile["foreground"] or foreground),
-                            rgba(profile["background"] or background),
-                            [rgba(c) for c in profile["palette"] or palette])
+    def apply_appearance(self, theme: dict, options: dict, settings: dict, *, profile_colors=False):
+        terminal = self.terminal
+        if profile_colors:
+            theme = theme | {target: self.profile[key] for key, target in
+                             (("foreground", "terminal_fg"), ("background", "terminal_bg"),
+                              ("palette", "ansi")) if self.profile[key]}
+        alpha = background_alpha(settings, terminal.get_display())
+        colors_key = theme, alpha, settings["background_opacity"]
+        if getattr(self, "current_colors", None) != colors_key:
+            appearance.colors(terminal, theme, alpha)
+            self.current_colors = colors_key
+        if getattr(self, "font_options", None) != options:
+            appearance.typography(terminal, options)
+            self.font_options = options
+        appearance.style_widget(terminal, f"vte-terminal {{ padding: {options['padding']}px; }}")
+
+    def set_font_size(self, size: int):
+        self.data["font_size"] = size
+        options = self.font_options | {"font_size": size}
+        if self.font_options != options:
+            self.terminal.set_font(appearance.font_description(self.terminal, options))
+            self.font_options = options
 
     def spawn(self, startup: str = "") -> None:
         if not model.executable(self.shell):

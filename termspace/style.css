@@ -1,64 +1,95 @@
-.app-header {
-  padding: 4px 8px;
-  min-height: 35px;
+window$scope { background: $window; color: $text; }
+$root.dialog, $root.dialog .dialog-action-box { background: $dialog; }
+$root.app-header, $root.terminal-tabs > header, $root.status-bar,
+$root.search-bar, $root.search-status { background: $header; color: $text; }
+$root.app-header {
+  padding: 3px 8px;
+  min-height: 36px;
+  border-bottom: 1px solid $border;
+  box-shadow: none;
+  border-spacing: 3px;
 }
-.wordmark {
-  font-weight: 700;
-  letter-spacing: 0.4px;
+$root.wordmark { font-weight: 700; }
+$root.terminal-tabs { background: transparent; }
+$root.terminal-tabs > stack { background: transparent; }
+$root.terminal-tabs > header { padding: 3px 6px 0; }
+$root.terminal-tabs > header tabs tab {
+  color: $muted;
+  background: transparent;
+  min-height: 28px;
+  margin: 0 3px 0 0;
+  padding: 0 5px;
+  border-radius: ${tab_radius}px ${tab_radius}px 0 0;
+  box-shadow: none;
 }
-.terminal-tabs > header {
-  padding: 0 6px;
+$root.terminal-tabs > header tabs tab:hover { background: $window; color: $text; }
+$root.terminal-tabs > header tabs tab:checked {
+  background: $tab;
+  color: $text;
+  box-shadow: inset 0 -2px $accent;
 }
-.terminal-tabs > header tabs tab {
-  min-height: 34px;
-  padding: 0 4px;
-}
-.tab-label {
-  padding-left: 8px;
-}
-.tab-count {
+$root.tab-label { padding-left: 7px; }
+$root.tab-count {
   font-size: 0.82em;
-  opacity: 0.75;
+  color: $muted;
   border-radius: 6px;
   padding: 0 5px;
-  background: alpha(currentColor, 0.08);
+  background: alpha($muted, 0.12);
 }
-.pane {
-  border: 1px solid alpha(currentColor, 0.15);
+$root.pane { background: transparent; border-style: solid; }
+$root.pane-header { padding-left: 8px; font-size: 0.9em; font-weight: 600; }
+$root.pane-header button, $root.tab-label button { padding: 0 3px; min-height: 21px; min-width: 21px; }
+$root.app-header button, $root.pane-header button, $root.tab-label button {
+  color: inherit;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
-.pane.focused {
-  border-color: @accent_bg_color;
+$root.pane-header button:hover, $root.tab-label button:hover, $root.app-header button:hover,
+$root.pane-header button:checked, $root.app-header button:checked {
+  background: alpha(currentColor, 0.12);
 }
-.pane-header {
-  padding-left: 8px;
-  font-size: 0.9em;
-  font-weight: 600;
-  background: alpha(currentColor, 0.055);
-}
-.pane.focused .pane-header {
-  background: alpha(@accent_bg_color, 0.2);
-}
-.pane-header button,
-.tab-label button {
-  padding: 1px 4px;
-  min-height: 20px;
-  min-width: 20px;
-}
-paned > separator {
+${root}paned > separator {
   min-height: 5px;
   min-width: 5px;
+  background: $window;
+  background-image: none;
 }
-.terminal-scrollbar {
-  background: alpha(currentColor, 0.04);
+${root}paned > separator:hover { background: $border; }
+$root.terminal-scrollbar slider {
+  margin: 0 1px;
+  border: 0;
+  border-radius: 5px;
 }
-.status-bar, .search-bar {
-  padding: 6px 10px;
-  font-size: 0.88em;
+$root.status-bar, $root.search-bar { padding: 4px 10px; font-size: 0.88em; }
+$root.status-bar { border-top: 1px solid $border; color: $muted; }
+$root.session-running { color: $success; }
+$root.session-starting { color: $warning; }
+$root.session-failed { color: $error; }
+$root.session-exited { color: $muted; }
+$root.zoom-notice {
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: $tab;
+  border: 1px solid $border;
+  color: $text;
 }
-.status-bar {
-  border-top: 1px solid alpha(currentColor, 0.12);
+${root}popover > contents, ${root}tooltip {
+  border: 1px solid $border;
+  border-radius: 8px;
+  color: $text;
+  background: $menu;
 }
-.terminal-scrollbar slider {
-  min-width: 5px;
-  background-color: alpha(currentColor, 0.32);
+${root}popover modelbutton:hover, ${root}popover row:hover { background: $tab; }
+$root.settings-dialog > box > notebook > header { background: $header; }
+$root.settings-dialog > box > notebook > header tab:checked { box-shadow: inset 0 -2px $accent; }
+$root.settings-dialog notebook > stack { background: $dialog; }
+$root.settings-dialog entry, $root.settings-dialog spinbutton, $root.settings-dialog dropdown > button {
+  background: $header;
+  color: $text;
+  border-color: $border;
 }
+window$scope.translucent-terminal,
+window$scope.translucent-terminal .terminal-tabs,
+window$scope.translucent-terminal .terminal-tabs > stack,
+window$scope.translucent-terminal vte-terminal { background: transparent; }
